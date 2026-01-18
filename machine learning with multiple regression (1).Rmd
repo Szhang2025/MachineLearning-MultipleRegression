@@ -1,0 +1,197 @@
+---
+title: "Multiple Regression for Predicting a Quantitative Target Variable"
+author: "Shiju Zhang"
+date: "`r Sys.Date()`"
+output: 
+  html_document:
+    toc: true
+    code_folding: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+
+```
+
+## Introduction
+This document demonstrates a machine learning workflow for multiple regression using a 70/30 train-test split.
+
+Load Required Libraries
+
+
+```{r}
+library(tidyverse)
+library(caret)
+library(kableExtra)
+```
+
+## Load and Explore Data
+For this example, we'll use the built-in mtcars dataset. In practice, you would load your own dataset.
+
+```{r}
+cat("Dataset dimensions:", dim(mtcars)[1], "rows and", dim(mtcars)[2], "columns\n")
+cat("Target variable: mpg (Miles per Gallon)\n")
+cat("Predictor variables:", paste(names(mtcars)[-1], collapse = ", "), "\n")
+```
+
+## Data Preparation
+
+```{r}
+# Set seed for reproducibility
+set.seed(123)
+
+# Create 70/30 train-test split
+train_index <- createDataPartition(mtcars$mpg, p = 0.7, list = FALSE)
+train_data <- mtcars[train_index, ]
+test_data <- mtcars[-train_index, ]
+
+cat("Training set size:", nrow(train_data), "observations\n")
+cat("Test set size:", nrow(test_data), "observations\n")
+```
+
+## Train Multiple Regression Model
+
+```{r}
+# Train linear regression model
+model <- lm(mpg ~ ., data = train_data) # The dot represents all other variables
+
+# Model summary
+summary(model)
+```
+
+## Make Predictions
+
+```{r}
+# Predict on test data
+predictions <- predict(model, newdata = test_data)
+
+# Create results data frame
+results <- data.frame(
+  Actual = test_data$mpg,
+  Predicted = predictions
+)
+head(results)
+```
+
+## Calculate Performance Metrics
+
+```{r}
+# Calculate metrics
+rmse <- sqrt(mean((results$Actual - results$Predicted)^2))
+mae <- mean(abs(results$Actual - results$Predicted))
+r2 <- cor(results$Actual, results$Predicted)^2
+mape <- mean(abs((results$Actual - results$Predicted)/results$Actual)) * 100
+
+# Create metrics table
+metrics_table <- data.frame(
+  Metric = c("RMSE", "MAE", "R-squared", "MAPE (%)"),
+  Value = c(
+    round(rmse, 3),
+    round(mae, 3),
+    round(r2, 3),
+    round(mape, 3)
+  ),
+  Description = c(
+    "Root Mean Square Error",
+    "Mean Absolute Error", 
+    "Coefficient of Determination",
+    "Mean Absolute Percentage Error"
+  )
+)
+
+# Display metrics table
+kable(metrics_table, caption = "Model Performance Metrics on Test Set") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
+```
+
+## Visualize Results
+
+```{r}
+# Create visualization
+library(patchwork)
+
+p1 <- ggplot(results, aes(x = Actual, y = Predicted)) +
+  geom_point(color = "steelblue", size = 3, alpha = 0.7) +
+  geom_abline(intercept = 0, slope = 1, color = "red", linetype = "dashed") +
+  labs(title = "Actual vs Predicted Values",
+       x = "Actual MPG",
+       y = "Predicted MPG") +
+  theme_minimal()
+
+p2 <- ggplot(results, aes(y = Predicted - Actual)) +
+  geom_boxplot() +
+  labs(title = "Distribution of Residuals",
+       x = "Residuals (Predicted - Actual)",
+       y = "Count") +
+  theme_minimal()
+
+p1 + p2
+```
+
+
+## Cross-Validation Results
+
+```{r}
+# Perform k-fold cross-validation on training data
+set.seed(123)
+cv_model <- train(mpg ~ ., 
+                  data = train_data,
+                  method = "lm",
+                  trControl = trainControl(method = "cv", number = 5))
+
+cv_results <- cv_model$results
+kable(cv_results, caption = "5-Fold Cross-Validation Results") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
+```
+
+## Conclusion
+
+The multiple regression model achieved an R-squared of `r round(r2, 3)` on the test set, indicating that approximately `r round(r2 * 100, 1)`\% of the variance in MPG is explained by the model. The RMSE of `r round(rmse, 3)` suggests the average prediction error.
+
+## Critical Thinking: Why Cross-Validation?
+
+The Problem with Simple Train/Test Split: if you use a 70/30 split (8 vehicles for training, 24 for testing), you might get unlucky.
+
+- What if your test set has mostly vehicles with higher horse power?
+
+- What if your test set has mostly heavy vehicles?
+
+- The model performance could vary wildly depending on which vehicles end up in the test set!
+
+The Solution: Cross-Validation
+
+Cross-validation helps solve this by systematically testing your model on different parts of your data. We creates $k$ folds with original data. We run a model using each of the folds as a test set and the remaining folds as a training set. The performance of each model is averaged to get the final performance metric. The standard deviation of the $k$ separate performance metrics can also be calculated. If we use the RMSE as a performance metric, the final CV performance metric can be expressed as $AVG.RMSE \pm SD$ (say $4.39\pm 0.35$), which tells you that
+
+- The typical error is about 4.39 miles pewr gallon.
+
+- The error varies between 4.04 and 4.74 depending on the data.
+
+- Your model is fairly consistent across different types of vehicles.
+
+
+## Appendix: How Cross-Validation Works
+
+CV takes 3 steps.
+
+- Step 1: Partition the Data
+We divide the original dataset into $k$ equally sized subsets, called "folds." For instance, with 100 data points and $k=5$, we would create 5 folds, each containing 20 data points.
+
+- Step 2: Iterative Training and Testing
+The algorithm performs $k$ separate modeling iterations. In each iteration:
+
+  Test Set: One fold serves as the test set
+
+  Training Set: The remaining $(k-1)$ folds combine to form the training set
+
+  This process rotates through all folds, ensuring each data point appears in the test set exactly once.
+
+- Step 3: Performance Aggregation
+  After completing all $k$ iterations, we calculate performance metrics (such as RMSE or accuracy) for each model. The final performance estimate is obtained by averaging these $k$ individual metrics, providing a more robust and reliable assessment of the model's generalization capability.
+
+This methodology offers several advantages:
+
+- (Reduced Variance) By averaging across multiple test sets, we minimize the impact of any particularly favorable or unfavorable data split.
+
+- (Maximized Data Utilization) Every data point contributes to both training and testing phases.
+
+- (Reliable Performance Estimation) The averaged metrics offer a more trustworthy indicator of how the model will perform on unseen data.
